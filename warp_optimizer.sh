@@ -28,6 +28,15 @@ getCPUArch(){
     esac
 }
 
+# 获取操作系统类型
+getOSType(){
+    case "$(uname)" in
+        Linux ) echo 'linux' ;;
+        Darwin ) echo 'darwin' ;;
+        * ) red "不支持的操作系统!" >&2; return 1 ;;
+    esac
+}
+
 # 优化 WARP Endpoint IP
 optimizeWARPIP(){
     local result_file="result.csv"
@@ -36,36 +45,53 @@ optimizeWARPIP(){
     # 删除之前的优选结果文件，以避免出错
     rm -f "$result_file"
 
+    # 获取 CPU 架构和操作系统类型
+    local arch; arch=$(getCPUArch)
+    local os_type; os_type=$(getOSType)
+
+    # 检查是否成功获取架构和操作系统类型
+    if [[ $? -ne 0 ]]; then
+        red "获取系统信息失败！"
+        exit 1
+    fi
+
     # 下载 WARP 优选工具
-    wget "https://gitlab.com/Misaka-blog/warp-script/-/raw/main/files/warp-yxip/warp-darwin-$(getCPUArch)" -O "$warp_tool"
+    wget "https://gitlab.com/Misaka-blog/warp-script/-/raw/main/files/warp-yxip/warp-${os_type}-${arch}" -O "$warp_tool"
 
     # 设置文件权限并取消 Linux 自带的线程限制
     chmod +x "$warp_tool"
     ulimit -n 102400
 
+    # 调试信息：确认 warp 工具的路径和权限
+    ls -l "$warp_tool"
+
     # 启动 WARP Endpoint IP 优选工具
     if [[ $1 == 6 ]]; then
-        "$warp_tool" -ipv6
+        "./$warp_tool" -ipv6
     else
-        "$warp_tool"
+        "./$warp_tool"
     fi
 
-    # 显示并保存前十个优选 Endpoint IP 及使用方法
-    green "当前最优 Endpoint IP 结果如下，并已保存至 $result_file 中："
-    awk -F, '$3!="timeout ms" {print} ' "$result_file" | sort -t, -nk2 -nk3 | uniq | head -11 | awk -F, '{print "端点 "$1" 丢包率 "$2" 平均延迟 "$3}'
-    echo ""
-    yellow "优选 IP 使用方法如下："
-    yellow "1. 将 WARP 的 WireGuard 节点的默认的 Endpoint IP：engage.cloudflareclient.com:2408 替换成本地网络最优的 Endpoint IP"
-    echo "设置方法命令行执行: warp-cli tunnel endpoint set 优选IP+端口"
+    # 确认 result.csv 是否生成
+    if [[ -f "$result_file" ]]; then
+        green "当前最优 Endpoint IP 结果如下，并已保存至 $result_file 中："
+        awk -F, '$3!="timeout ms" {print} ' "$result_file" | sort -t, -nk2 -nk3 | uniq | head -11 | awk -F, '{print "端点 "$1" 丢包率 "$2" 平均延迟 "$3}'
+        echo ""
+        yellow "优选 IP 使用方法如下："
+        yellow "1. 将 WARP 的 WireGuard 节点的默认的 Endpoint IP：engage.cloudflareclient.com:2408 替换成本地网络最优的 Endpoint IP"
+        echo "设置方法命令行执行: warp-cli tunnel endpoint set 优选IP+端口"
 
-    # 自动设置第一个最优 IP
-    local best_ip; best_ip=$(awk -F, 'NR==2{print $1}' "$result_file")
-    if warp-cli settings | grep -q "Organization"; then
-        sudo warp-cli tunnel endpoint set "$best_ip"
-        echo "已经成功自动设置为第一个最优IP"
+        # 自动设置第一个最优 IP
+        local best_ip; best_ip=$(awk -F, 'NR==2{print $1}' "$result_file")
+        if warp-cli settings | grep -q "Organization"; then
+            sudo warp-cli tunnel endpoint set "$best_ip"
+            echo "已经成功自动设置为第一个最优IP"
+        else
+            warp-cli tunnel endpoint set "$best_ip"
+            echo "已经成功自动设置为第一个最优IP"
+        fi
     else
-        warp-cli tunnel endpoint set "$best_ip"
-        echo "已经成功自动设置为第一个最优IP"
+        red "未生成 result.csv 文件，请检查 warp 工具是否正确运行。"
     fi
 
     # 删除 WARP 优选工具
