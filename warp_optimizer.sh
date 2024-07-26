@@ -81,14 +81,24 @@ optimizeWARPIP(){
         yellow "1. 将 WARP 的 WireGuard 节点的默认的 Endpoint IP：engage.cloudflareclient.com:2408 替换成本地网络最优的 Endpoint IP"
         echo "设置方法命令行执行: warp-cli tunnel endpoint set 优选IP+端口"
 
-        # 自动设置第一个最优 IP
-        local best_ip; best_ip=$(awk -F, 'NR==2{print $1}' "$result_file")
-        if warp-cli settings | grep -q "Organization"; then
-            sudo warp-cli tunnel endpoint set "$best_ip"
-            echo "已经成功自动设置为第一个最优IP"
-        else
-            warp-cli tunnel endpoint set "$best_ip"
-            echo "已经成功自动设置为第一个最优IP"
+        # 自动设置第一个最优 IP 并检查是否能访问openai.com
+        local best_ip
+        for best_ip in $(awk -F, 'NR>1{print $1}' "$result_file"); do
+            if curl --connect-timeout 5 -s https://chatgpt.com > /dev/null; then
+                if warp-cli settings | grep -q "Organization"; then
+                    sudo warp-cli tunnel endpoint set "$best_ip"
+                else
+                    warp-cli tunnel endpoint set "$best_ip"
+                fi
+                echo "已经成功自动设置为第一个能够访问openai.com的最优IP: $best_ip"
+                break
+            else
+                red "IP: $best_ip 无法访问 openai.com，尝试下一个。"
+            fi
+        done
+
+        if [[ -z "$best_ip" ]]; then
+            red "没有找到能够访问openai.com的最优IP，请手动检查。"
         fi
     else
         red "未生成 result.csv 文件，请检查 warp 工具是否正确运行。"
